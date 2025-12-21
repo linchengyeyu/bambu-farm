@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bambu Batch Manager - 自动换盘管理系统</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+    <style>
+        :root {
+            --el-color-primary: #009688; /* 拓竹绿风格 */
+        }
+        body { 
+            font-family: 'Inter', 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif; 
+            background-color: #f0f2f5; 
+            margin: 0; 
+            padding: 0;
+            color: #303133;
+        }
+        .app-header {
+            background-color: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            padding: 0 20px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .app-logo {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--el-color-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 20px auto; 
+            padding: 0 20px;
+        }
+        .status-dashboard {
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #909399;
+        }
+        .upload-zone {
+            margin-bottom: 24px;
+        }
+        .task-list-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .task-card-item {
+            margin-bottom: 16px;
+            transition: all 0.3s;
+            border-left: 4px solid transparent;
+        }
+        .task-card-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        }
+        .task-card-item.status-printing {
+            border-left-color: var(--el-color-primary);
+            background-color: #f0f9eb;
+        }
+        .thumbnail-box {
+            width: 100px;
+            height: 100px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #f5f7fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #ebeef5;
+        }
+        .thumbnail-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .param-tag {
+            margin-right: 6px;
+            margin-bottom: 6px;
+        }
+        .upload-dialog-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            .container { padding: 0 10px; }
+            .el-col { margin-bottom: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header class="app-header">
+            <div class="app-logo">
+                <el-icon><Printer /></el-icon>
+                Bambu Batch Manager
+            </div>
+            <div>
+                <el-button text @click="showPrinterMgr = true" style="margin-right: 15px">
+                    <el-icon style="margin-right: 5px"><Setting /></el-icon> 管理打印机
+                </el-button>
+                <el-tag :type="schedulerRunning ? 'success' : 'danger'" effect="dark" round>
+                    {{ schedulerRunning ? '调度运行中' : '调度已暂停' }}
+                </el-tag>
+                <el-switch 
+                    v-model="schedulerRunning" 
+                    style="margin-left: 10px"
+                    inline-prompt
+                    active-text="ON"
+                    inactive-text="OFF"
+                    @change="toggleScheduler"
+                ></el-switch>
+            </div>
+        </header>
+
+        <div class="container">
+            <!-- 状态仪表盘 -->
+            <div class="status-dashboard">
+                <el-empty v-if="status.printers.length === 0" description="暂无打印机，请在后台添加"></el-empty>
+                
+                <el-row :gutter="20" v-for="printer in status.printers" :key="printer.serial_no" style="margin-bottom: 20px;">
+                    <!-- 打印机状态 -->
+                    <el-col :xs="24" :sm="8">
+                        <el-card shadow="hover" class="stat-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span class="stat-label">
+                                    {{ printer.serial_no }} 
+                                    <el-tag size="small" v-if="!printer.connected" type="danger">断开</el-tag>
+                                </span>
+                                <el-icon :size="20" color="#909399"><Monitor /></el-icon>
+                            </div>
+                            <div class="stat-value" :style="{ color: getStatusColor(printer.g_st) }">
+                                {{ getPrinterStatusText(printer.g_st) }}
+                            </div>
+                            <div v-if="printer.is_cooling" style="font-size: 13px; color: #e6a23c; display: flex; align-items: center; gap: 4px;">
+                                <el-icon class="is-loading"><Loading /></el-icon> 换盘冷却中...
+                            </div>
+                            <div v-if="printer.error" style="font-size: 13px; color: #f56c6c;">
+                                错误码: {{ printer.error }}
+                            </div>
+                        </el-card>
+                    </el-col>
+                    <!-- 进度与温度 -->
+                    <el-col :xs="24" :sm="8">
+                        <el-card shadow="hover" class="stat-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <span class="stat-label">实时监控</span>
+                                <span style="font-weight: bold;">{{ printer.progress }}%</span>
+                            </div>
+                            <el-progress :percentage="printer.progress" :stroke-width="10" :show-text="false" :status="printer.g_st === 6 ? '' : 'success'"></el-progress>
+                            <div style="margin-top: 15px; display: flex; justify-content: space-between; font-size: 13px; color: #606266;">
+                                <span>🌡️ 喷头: <b>{{ printer.nozzle_temp }}°C</b></span>
+                                <span>🔥 热床: <b>{{ printer.bed_temp }}°C</b></span>
+                            </div>
+                        </el-card>
+                    </el-col>
+                    <!-- 队列统计 (全局) -->
+                    <el-col :xs="24" :sm="8" v-if="status.printers.indexOf(printer) === 0">
+                        <el-card shadow="hover" class="stat-card">
+                            <div class="stat-label">队列概览 (总计)</div>
+                            <div style="display: flex; gap: 20px; margin-top: 10px;">
+                                <div>
+                                    <div class="stat-value" style="font-size: 20px;">{{ tasks.filter(t => t.status === 'pending').length }}</div>
+                                    <div style="font-size: 12px; color: #909399;">等待中</div>
+                                </div>
+                                <div>
+                                    <div class="stat-value" style="font-size: 20px; color: #67C23A;">{{ tasks.filter(t => t.status === 'completed').length }}</div>
+                                    <div style="font-size: 12px; color: #909399;">已完成</div>
+                                </div>
+                                <div>
+                                    <div class="stat-value" style="font-size: 20px; color: #F56C6C;">{{ tasks.filter(t => t.status === 'failed').length }}</div>
+                                    <div style="font-size: 12px; color: #909399;">失败</div>
+                                </div>
+                            </div>
+                        </el-card>
+                    </el-col>
+                </el-row>
+            </div>
+
+            <!-- 操作栏 -->
+            <div class="task-list-header">
+                <h2 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                    <el-icon><List /></el-icon> 生产队列
+                </h2>
+                <el-button type="primary" size="large" @click="showUploadDialog = true">
+                    <el-icon style="margin-right: 5px"><Plus /></el-icon> 新增任务
+                </el-button>
+            </div>
+
+            <!-- 任务列表 -->
+            <div v-if="tasks.length > 0">
+                <el-card v-for="task in tasks" :key="task.id" 
+                    class="task-card-item" 
+                    :class="{ 'status-printing': task.status === 'printing' }"
+                    :body-style="{ padding: '15px' }">
+                    <el-row :gutter="20" align="middle">
+                        <el-col :xs="8" :sm="3">
+                            <div class="thumbnail-box">
+                                <img :src="task.thumbnail_path || 'https://via.placeholder.com/100x100?text=No+Img'" loading="lazy">
+                            </div>
+                        </el-col>
+                        <el-col :xs="16" :sm="15">
+                            <h3 style="margin: 0 0 8px 0; font-size: 16px; word-break: break-all;">
+                                {{ task.filename }}
+                                <el-tag v-if="task.priority > 0" type="warning" size="small" effect="dark" style="margin-left: 5px;">
+                                    Priority: {{ task.priority }}
+                                </el-tag>
+                            </h3>
+                            <div style="color: #909399; font-size: 13px; margin-bottom: 8px;">
+                                <el-icon style="vertical-align: -1px"><Clock /></el-icon> {{ new Date(task.created_at).toLocaleString() }}
+                                <span v-if="task.completed_at"> · 完成于 {{ new Date(task.completed_at).toLocaleTimeString() }}</span>
+                            </div>
+                            <div>
+                                <el-tag size="small" effect="plain" class="param-tag" v-if="task.bed_levelling">热床调平</el-tag>
+                                <el-tag size="small" effect="plain" class="param-tag" v-if="task.flow_cali">流量校准</el-tag>
+                                <el-tag size="small" effect="plain" class="param-tag" v-if="task.use_ams">AMS</el-tag>
+                                <el-tag size="small" effect="plain" class="param-tag" v-if="task.timelapse">延时摄影</el-tag>
+                            </div>
+                        </el-col>
+                        <el-col :xs="24" :sm="6" style="text-align: right; margin-top: 10px;">
+                            <el-tag :type="getTaskStatusType(task.status)" size="large" effect="dark" style="margin-right: 10px;">
+                                {{ getTaskStatusText(task.status) }}
+                            </el-tag>
+                            
+                            <!-- 操作按钮组 -->
+                            <el-button-group style="margin-right: 10px;">
+                                <el-tooltip content="置顶插队" v-if="task.status === 'pending'">
+                                    <el-button type="warning" icon="Top" plain circle @click="prioritizeTask(task.id)"></el-button>
+                                </el-tooltip>
+                                <el-tooltip content="重试任务" v-if="task.status === 'failed' || task.status === 'completed'">
+                                    <el-button type="success" icon="RefreshRight" plain circle @click="retryTask(task.id)"></el-button>
+                                </el-tooltip>
+                            </el-button-group>
+
+                            <el-popconfirm 
+                                title="确定删除此任务吗？" 
+                                @confirm="deleteTask(task.id)"
+                                v-if="['pending', 'failed', 'completed'].includes(task.status)"
+                            >
+                                <template #reference>
+                                    <el-button type="danger" icon="Delete" circle plain></el-button>
+                                </template>
+                            </el-popconfirm>
+                        </el-col>
+                    </el-row>
+                </el-card>
+            </div>
+            <el-empty v-else description="队列空空如也，快去添加任务吧！"></el-empty>
+        </div>
+
+        <!-- 上传弹窗 -->
+        <el-dialog v-model="showUploadDialog" title="上传打印文件 (.3mf)" width="500px" destroy-on-close>
+            <el-upload
+                class="upload-demo"
+                drag
+                action=""
+                :auto-upload="false"
+                :on-change="handleFileChange"
+                :show-file-list="false"
+                accept=".3mf"
+            >
+                <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+                <div class="el-upload__text">
+                    拖拽文件到此处或 <em>点击上传</em>
+                    <div v-if="selectedFile" style="margin-top: 10px; color: var(--el-color-primary); font-weight: bold;">
+                        已选择: {{ selectedFile.name }}
+                    </div>
+                </div>
+            </el-upload>
+            
+            <div style="margin-top: 20px;">
+                <div style="font-weight: bold; margin-bottom: 10px;">打印参数覆盖</div>
+                <el-row :gutter="20">
+                    <el-col :span="12"><el-checkbox v-model="uploadParams.bed_levelling" label="热床调平" border style="width: 100%" /></el-col>
+                    <el-col :span="12"><el-checkbox v-model="uploadParams.flow_cali" label="流量校准" border style="width: 100%" /></el-col>
+                </el-row>
+                <el-row :gutter="20" style="margin-top: 10px;">
+                    <el-col :span="12"><el-checkbox v-model="uploadParams.use_ams" label="使用 AMS" border style="width: 100%" /></el-col>
+                    <el-col :span="12"><el-checkbox v-model="uploadParams.timelapse" label="延时摄影" border style="width: 100%" /></el-col>
+                </el-row>
+                
+                <div style="margin-top: 15px; display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 14px;">重复次数:</span>
+                    <el-input-number v-model="uploadParams.repeat_count" :min="1" :max="50" style="width: 120px;" />
+                    <span style="font-size: 12px; color: #909399;">(自动创建多条任务)</span>
+                </div>
+            </div>
+
+            <template #footer>
+                <div class="upload-dialog-footer">
+                    <el-button @click="showUploadDialog = false">取消</el-button>
+                    <el-button type="primary" @click="uploadTask" :loading="uploading" :disabled="!selectedFile">
+                        确认添加到队列
+                    </el-button>
+                </div>
+            </template>
+        </el-dialog>
+
+        <!-- 打印机管理弹窗 -->
+        <el-dialog v-model="showPrinterMgr" title="打印机管理" width="700px">
+            <el-table :data="status.printers" style="width: 100%; margin-bottom: 20px;" border>
+                <el-table-column prop="name" label="名称" width="120"></el-table-column>
+                <el-table-column prop="ip" label="IP地址" width="130"></el-table-column>
+                <el-table-column prop="serial_no" label="序列号" width="180"></el-table-column>
+                <el-table-column label="状态" width="100">
+                    <template #default="scope">
+                        <el-tag :type="scope.row.connected ? 'success' : 'danger'" size="small">
+                            {{ scope.row.connected ? '在线' : '离线' }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" fixed="right" min-width="100">
+                    <template #default="scope">
+                        <el-popconfirm title="确定删除这台打印机吗？" @confirm="deletePrinter(scope.row.id)">
+                            <template #reference>
+                                <el-button type="danger" size="small" link>删除</el-button>
+                            </template>
+                        </el-popconfirm>
+                    </template>
+                </el-table-column>
+            </el-table>
+
+            <el-divider content-position="left">添加新打印机</el-divider>
+
+            <el-form :model="newPrinter" label-width="100px" :inline="true" size="small">
+                <el-form-item label="名称">
+                    <el-input v-model="newPrinter.name" placeholder="如: 1号机"></el-input>
+                </el-form-item>
+                <el-form-item label="IP地址">
+                    <el-input v-model="newPrinter.ip" placeholder="192.168.x.x"></el-input>
+                </el-form-item>
+                <el-form-item label="序列号">
+                    <el-input v-model="newPrinter.serial_no" placeholder="机器SN码"></el-input>
+                </el-form-item>
+                <el-form-item label="访问码">
+                    <el-input v-model="newPrinter.access_code" placeholder="Access Code"></el-input>
+                </el-form-item>
+                <el-form-item>
+                    <el-button type="primary" @click="addPrinter">添加</el-button>
+                </el-form-item>
+            </el-form>
+        </el-dialog>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, reactive } = Vue;
+        const { ElMessage } = ElementPlus;
+        
+        const app = createApp({
+            setup() {
+                const status = reactive({
+                    printers: [],
+                    scheduler: 'paused'
+                });
+                const tasks = ref([]);
+                const schedulerRunning = ref(false);
+                const showUploadDialog = ref(false);
+                const showPrinterMgr = ref(false);
+                const selectedFile = ref(null);
+                const uploading = ref(false);
+                const uploadParams = reactive({
+                    bed_levelling: true,
+                    flow_cali: true,
+                    timelapse: false,
+                    use_ams: false,
+                    repeat_count: 1
+                });
+                const newPrinter = reactive({
+                    name: '', ip: '', serial_no: '', access_code: ''
+                });
+
+                // 获取数据
+                const fetchData = async () => {
+                    try {
+                        const [statusRes, tasksRes] = await Promise.all([
+                            axios.get('/status'),
+                            axios.get('/tasks')
+                        ]);
+                        status.printers = statusRes.data.printers;
+                        status.scheduler = statusRes.data.scheduler;
+                        schedulerRunning.value = status.scheduler === 'running';
+                        tasks.value = tasksRes.data;
+                    } catch (e) {
+                        console.error('Data fetch error:', e);
+                    }
+                };
+
+                onMounted(() => {
+                    fetchData();
+                    // 轮询 (3s)
+                    setInterval(fetchData, 3000);
+                });
+
+                const toggleScheduler = async (val) => {
+                    const action = val ? 'resume' : 'pause';
+                    try {
+                        await axios.post(`/control/${action}`);
+                        ElMessage.success(val ? '调度已启动' : '调度已暂停');
+                        fetchData();
+                    } catch (e) {
+                        ElMessage.error('操作失败');
+                        schedulerRunning.value = !val; // 回滚
+                    }
+                };
+
+                const handleFileChange = (file) => {
+                    if (file.raw.name.endsWith('.3mf')) {
+                        selectedFile.value = file.raw;
+                    } else {
+                        ElMessage.warning('仅支持 .3mf 文件');
+                    }
+                };
+
+                const uploadTask = async () => {
+                    if (!selectedFile.value) return;
+                    
+                    const formData = new FormData();
+                    formData.append('file', selectedFile.value);
+                    Object.keys(uploadParams).forEach(key => {
+                        formData.append(key, uploadParams[key]);
+                    });
+
+                    uploading.value = true;
+                    try {
+                        await axios.post('/upload', formData);
+                        ElMessage.success('任务已添加');
+                        selectedFile.value = null;
+                        showUploadDialog.value = false;
+                        fetchData();
+                    } catch (e) {
+                        ElMessage.error('上传失败: ' + (e.response?.data?.detail || e.message));
+                    } finally {
+                        uploading.value = false;
+                    }
+                };
+
+                const deleteTask = async (id) => {
+                    try {
+                        await axios.delete(`/tasks/${id}`);
+                        ElMessage.success('已删除');
+                        fetchData();
+                    } catch (e) {
+                        ElMessage.error('删除失败');
+                    }
+                };
+
+                const retryTask = async (id) => {
+                    try {
+                        await axios.post(`/tasks/${id}/retry`);
+                        ElMessage.success('已重置任务状态');
+                        fetchData();
+                    } catch (e) {
+                        ElMessage.error('操作失败');
+                    }
+                };
+
+                const prioritizeTask = async (id) => {
+                    try {
+                        await axios.patch(`/tasks/${id}`, { priority: 10 });
+                        ElMessage.success('已插队置顶');
+                        fetchData();
+                    } catch (e) {
+                        ElMessage.error('操作失败');
+                    }
+                };
+                
+                const addPrinter = async () => {
+                    if(!newPrinter.ip || !newPrinter.access_code) return ElMessage.warning('请填写完整信息');
+                    try {
+                        await axios.post('/printers', newPrinter);
+                        ElMessage.success('添加成功');
+                        // 清空表单
+                        Object.assign(newPrinter, { name: '', ip: '', serial_no: '', access_code: '' });
+                        fetchData();
+                    } catch (e) {
+                        ElMessage.error('添加失败: ' + (e.response?.data?.detail || e.message));
+                    }
+                };
+
+                const deletePrinter = async (id) => {
+                    try {
+                        await axios.delete(`/printers/${id}`);
+                        ElMessage.success('删除成功');
+                        fetchData();
+                    } catch (e) {
+                        ElMessage.error('删除失败');
+                    }
+                };
+
+                // 状态映射
+                const getPrinterStatusText = (st) => {
+                    const map = {
+                        '-1': '未知 / 连接中', 0: '离线', 1: '空闲 (Ready)', 
+                        2: '准备中', 3: '打印中', 4: '暂停', 
+                        5: '完成', 6: '打印中', 100: '已完成 (待清理)'
+                    };
+                    return map[st] || `未知状态 (${st})`;
+                };
+
+                const getStatusColor = (st) => {
+                    if (st === 1) return '#67C23A'; // Green
+                    if (st === 6 || st === 2 || st === 3) return '#409EFF'; // Blue
+                    return '#909399'; // Gray
+                };
+
+                const getTaskStatusText = (st) => {
+                    const map = { 'pending': '等待中', 'printing': '打印中', 'completed': '已完成', 'failed': '失败' };
+                    return map[st] || st;
+                };
+
+                const getTaskStatusType = (st) => {
+                    const map = { 'pending': 'info', 'printing': 'primary', 'completed': 'success', 'failed': 'danger' };
+                    return map[st] || 'info';
+                };
+
+                return {
+                    status, tasks, schedulerRunning, showUploadDialog, showPrinterMgr, selectedFile, uploading, uploadParams, newPrinter,
+                    toggleScheduler, handleFileChange, uploadTask, deleteTask, retryTask, prioritizeTask, addPrinter, deletePrinter,
+                    getPrinterStatusText, getStatusColor, getTaskStatusText, getTaskStatusType
+                };
+            }
+        });
+
+        app.use(ElementPlus);
+        for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+            app.component(key, component)
+        }
+        app.mount('#app');
+    </script>
+</body>
+</html>

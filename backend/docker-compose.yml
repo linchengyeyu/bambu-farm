@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  bambu-batch-manager:
+    build: .
+    container_name: bambu_manager
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./static:/app/static
+      - ./.env:/app/.env
+    environment:
+      - TZ=Asia/Shanghai
