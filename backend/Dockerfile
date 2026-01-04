@@ -1,14 +1,16 @@
 # 第一阶段：构建环境
-FROM python:3.11-slim as builder
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安装 curl (用于上传)
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# 设置时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 复制依赖
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 使用清华源加速安装依赖
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 复制项目代码
 COPY . .

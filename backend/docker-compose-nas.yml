@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  bambu-batch-manager:
+    # 指向当前目录下的 Dockerfile 进行构建
+    # 请确保您已将代码文件夹上传到 NAS，并且此 YAML 文件位于代码根目录
+    build: .
+    
+    container_name: bambu_manager
+    restart: always
+    
+    # 端口映射：左边是 NAS 访问端口，右边是容器端口
+    # 启动后访问 http://NAS_IP:3508
+    ports:
+      - "3508:8000"
+    
+    # 数据持久化：使用 ../ 将数据保存在 backend 文件夹的上级目录
+    # 这样更新代码（替换 backend 文件夹）时，数据不会丢失
+    # 实际路径会是：/Container/bambu/data 等
+    volumes:
+      - ../data:/app/data
+      - ../uploads:/app/uploads
+      - ../static:/app/static
+    
+    # 环境变量配置（请修改为您自己的打印机信息）
+    environment:
+      - TZ=Asia/Shanghai
+      - PRINTER_IP=192.168.x.x      # 请修改为您的打印机IP
+      - ACCESS_CODE=12345678        # 请修改为您的访问码
+      - SERIAL_NO=0300AA5Axxxxxx    # 请修改为您的序列号
+      - SWAP_COOLDOWN=60
