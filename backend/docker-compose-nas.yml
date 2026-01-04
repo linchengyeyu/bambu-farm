@@ -20,7 +20,8 @@ services:
     volumes:
       - ../data:/app/data
       - ../uploads:/app/uploads
-      - ../static:/app/static
+      # - ../static:/app/static  <-- 注释掉此行，直接使用镜像内自带的网页文件
+
     
     # 环境变量配置（请修改为您自己的打印机信息）
     environment:
