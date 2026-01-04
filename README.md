@@ -2,6 +2,20 @@
 
 > **告别"人等机"、"机等人"的低效时代。让您的拓竹打印机实现 7x24 小时无人值守连续生产。**
 
+## ⚠️ 重要说明 (必读)
+
+1.  **固件版本要求**：由于拓竹最新固件封锁了外部 MQTT 指令，使用本系统**必须降级固件**。
+    *   **A1 mini**：需降级到 `01.04.00.00` 版本。
+    *   **A1**：请自行查找支持 MQTT 的旧版本固件。
+2.  **硬件/Gcode 要求**：
+    *   必须添加“打印结束后自动换盘”的结束 G-code 代码。
+    *   **禁止**添加“开始打印自动上盘”代码，否则可能导致喷嘴磨盘。
+    *   参考项目：[全自动换板稳定无需干预(A1 mini)](https://makerworld.com.cn/zh/models/1146204-quan-zi-dong-huan-ban-wen-ding-wu-xu-gan-yu-a1-min)
+3.  **运行原理**：本系统通过 MQTT 协议将 `gcode.3mf` 文件发送到打印机 SD 卡中，并监控状态实现按顺序自动打印。
+4.  **测试环境**：本项目已在 **A1 mini** 上亲测通过。
+
+---
+
 ## 🎯 核心痛点与解决方案
 
 您是否遇到过这些问题？
@@ -73,10 +87,10 @@ services:
       # ⚠️ 建议修改为真实路径，确保数据持久化
       - /share/Container/bambu/data:/app/data
       - /share/Container/bambu/uploads:/app/uploads
-      - /share/Container/bambu/static:/app/static
+      # - /share/Container/bambu/static:/app/static # 推荐注释掉此行，直接使用内置网页
     environment:
       - TZ=Asia/Shanghai
-      - PRINTER_IP=192.168.31.175  # 你的打印机 IP
+      - PRINTER_IP=192.168.x.x      # 你的打印机 IP
       - ACCESS_CODE=12345678       # 你的访问码
       - SERIAL_NO=0300AA5A...      # 你的序列号
       - SWAP_COOLDOWN=60           # 打印完成后冷却时间(秒)
@@ -88,13 +102,7 @@ services:
 
 ---
 
-## 常见问题
-
-**Q: 支持 P1P/P1S 吗？**
-A: 支持。只要是支持 MQTT 和 FTP 协议的拓竹机型理论上都支持。
-
-**Q: 为什么上传后没有立即打印？**
-A: 系统会检查打印机状态。如果打印机状态不是 `IDLE` (空闲)，任务会处于 `pending` (等待中) 状态。请确保打印机热床已清空且处于主界面。
+## 常见问题 (FAQ)
 
 **Q: 部署报错 "no such file or directory"？**
 A: 请检查 YAML 中的 `build` 路径是否填写正确，必须是 NAS 里的绝对路径。
@@ -103,10 +111,8 @@ A: 请检查 YAML 中的 `build` 路径是否填写正确，必须是 NAS 里的
 A: **这是因为 Docker 挂载覆盖了容器内的文件。**
 *   **原因**：当您在 Docker 配置中将 NAS 的 `static` 目录挂载到容器的 `/app/static` 时，如果 NAS 上的 `static` 目录是空的（新建的），它会覆盖容器镜像里原本存在的网页文件。
 *   **解决方法**：
-    1.  在您的电脑上找到项目源码中的 `backend/static` 文件夹（里面有 `index.html`）。
-    2.  通过 NAS 的文件管理器（File Station），将 `index.html` 手动上传到 NAS 上对应的挂载目录（例如 `/share/Container/bambu/static`）。
-    3.  刷新浏览器即可（无需重启容器）。
+    *   **方案一（推荐）**：在 `docker-compose.yml` 中**注释掉** `- .../static:/app/static` 这一行。
+    *   **方案二**：手动将源码中的 `backend/static/index.html` 上传到 NAS 的挂载目录。
 
 ## 开源协议
 本项目采用 [MIT License](LICENSE) 开源协议。
-
